@@ -1,0 +1,9 @@
+/* Custom styles if needed */
+.stats {
+    text-align: center;
+    padding: 15px;
+    background-color: #f7f7f7;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 20px;
+}
