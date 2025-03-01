@@ -1,69 +1,97 @@
 <?php
-
 defined('BASEPATH') or exit('No direct script access allowed');
 
-class Custom_pricing extends AdminController {
-
-    public function __construct() {
+class Custom_pricing extends AdminController
+{
+    public function __construct()
+    {
         parent::__construct();
-        $this->load->model('custom_pricing/custom_pricing_model');
-        $this->load->helper(CUSTOM_PRICING_MODULE_NAME . '/custom_pricing');
+        $this->load->helper('custom_pricing_helper');
     }
 
-    public function index() {
-        $data['total_pricing_rules'] = count($this->custom_pricing_model->get_all_pricing_rules());
-        $data['total_customers'] = count(custom_pricing_get_customers());
-        $data['total_items'] = count(custom_pricing_get_items());
-        $data['title'] = _l('custom_pricing_overview');
-        $this->load->view('custom_pricing_overview', $data);
+    /**
+     * Index method - redirect to customer pricing
+     */
+    public function index()
+    {
+        redirect(admin_url('custom_pricing/customer_pricing'));
     }
 
-    public function settings() {
-        $data['customers'] = custom_pricing_get_customers();
-        $data['items'] = custom_pricing_get_items();
-        $data['pricing_rules'] = $this->custom_pricing_model->get_all_pricing_rules();
-        $data['title'] = _l('custom_pricing_settings');
-        $this->load->view('admin/custom_pricing_settings', $data);
+    /**
+     * Get price for a customer-item combination
+     * 
+     * @param int $customer_id
+     * @param int $item_id
+     * @return string
+     */
+    public function get_price($customer_id, $item_id)
+    {
+        $price = get_customer_item_price($customer_id, $item_id);
+        echo $price;
     }
 
-    public function save() {
-        $data = $this->input->post();
-        if ($this->input->post('id')) {
-            $this->custom_pricing_model->update_pricing_rule($this->input->post('id'), $data);
-            set_alert('success', _l('updated_successfully', _l('custom_pricing')));
-        } else {
-            $this->custom_pricing_model->add_pricing_rule($data);
-            set_alert('success', _l('added_successfully', _l('custom_pricing')));
-        }
-        redirect(admin_url('custom_pricing/settings'));
-    }
-
-    public function edit($id) {
-        $data['customers'] = custom_pricing_get_customers();
-        $data['items'] = custom_pricing_get_items();
-        $data['pricing_rule'] = $this->custom_pricing_model->get_custom_pricing($id);
-        $data['title'] = _l('edit_custom_pricing');
-        $this->load->view('custom_pricing_settings', $data);
-    }
-
-    public function delete($id) {
-        $this->custom_pricing_model->delete_pricing_rule($id);
-        set_alert('success', _l('deleted', _l('custom_pricing')));
-        redirect(admin_url('custom_pricing/settings'));
+    /**
+ * Change pricing status (active/inactive)
+ */
+public function change_status()
+{
+    if (!has_permission('custom_pricing', '', 'edit')) {
+        echo json_encode([
+            'success' => false,
+            'message' => _l('access_denied')
+        ]);
+        die;
     }
     
-    public function save_pricing_rule() {
-        $data = $this->input->post();
+    $id = $this->input->post('id');
+    $status = $this->input->post('status');
     
-        // Save the pricing rule using the model
-        $success = $this->custom_pricing_model->save_pricing_rule($data);
+    $this->db->where('id', $id);
+    $this->db->update('tblcustomer_pricing', [
+        'is_active' => $status,
+        'updated_at' => date('Y-m-d H:i:s')
+    ]);
     
-        if ($success) {
-            set_alert('success', 'Pricing rule saved successfully.');
-        } else {
-            set_alert('danger', 'Failed to save pricing rule.');
-        }
-    
-        redirect(admin_url('custom_pricing/settings'));
+    echo json_encode([
+        'success' => true
+    ]);
+}
+
+// In controllers/Custom_pricing.php add these methods:
+
+/**
+ * DataTables data for customer pricing
+ */
+public function table()
+{
+    if (!has_permission('custom_pricing', '', 'view')) {
+        ajax_access_denied();
     }
+
+    $this->app->get_table_data(module_views_path('custom_pricing', 'customer_pricing/table'));
+}
+
+/**
+ * DataTables data for customer group pricing
+ */
+public function group_pricing_table()
+{
+    if (!has_permission('custom_pricing', '', 'view')) {
+        ajax_access_denied();
+    }
+
+    $this->app->get_table_data(module_views_path('custom_pricing', 'customer_group_pricing/table'));
+}
+
+/**
+ * DataTables data for item groups
+ */
+public function item_groups_table()
+{
+    if (!has_permission('custom_pricing', '', 'view')) {
+        ajax_access_denied();
+    }
+
+    $this->app->get_table_data(module_views_path('custom_pricing', 'item_groups/table'));
+}
 }

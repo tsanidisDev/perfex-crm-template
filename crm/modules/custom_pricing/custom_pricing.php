@@ -1,39 +1,128 @@
 <?php
-
 defined('BASEPATH') or exit('No direct script access allowed');
 
 /*
 Module Name: Custom Pricing
-Description: Custom pricing and discount management for items based on customers.
+Description: Customer-specific pricing and item group discounting
 Version: 1.0.0
-Author: Your Company Name
+Requires at least: 2.3.*
+Author: Your Name
 */
 
-define('CUSTOM_PRICING_MODULE_NAME', 'custom_pricing');
-define('CUSTOM_PRICING_UPLOAD_FOLDER', module_dir_path(CUSTOM_PRICING_MODULE_NAME, 'uploads'));
+hooks()->add_action('admin_init', 'custom_pricing_module_init_menu_items');
+hooks()->add_action('app_admin_head', 'custom_pricing_module_add_head_components');
+hooks()->add_action('app_admin_footer', 'custom_pricing_module_add_footer_components');
+hooks()->add_action('admin_init', 'custom_pricing_module_permissions');
 
-// Register install/uninstall hooks
-register_activation_hook(CUSTOM_PRICING_MODULE_NAME, 'custom_pricing_install');
-register_deactivation_hook(CUSTOM_PRICING_MODULE_NAME, 'custom_pricing_uninstall');
+// Invoice, estimate, proposal hooks
+hooks()->add_filter('before_add_item', 'custom_pricing_modify_item_price');
+hooks()->add_filter('before_update_item', 'custom_pricing_modify_item_price');
+hooks()->add_filter('before_add_estimate_item', 'custom_pricing_modify_item_price');
+hooks()->add_filter('before_update_estimate_item', 'custom_pricing_modify_item_price');
+hooks()->add_filter('before_add_proposal_item', 'custom_pricing_modify_item_price');
+hooks()->add_filter('before_update_proposal_item', 'custom_pricing_modify_item_price');
 
-hooks()->add_action('admin_init', 'custom_pricing_permissions');
-hooks()->add_action('app_admin_head', 'custom_pricing_add_head_components');
-hooks()->add_action('app_admin_footer', 'custom_pricing_load_js');
-hooks()->add_action('after_invoice_added', 'custom_pricing_apply_pricing_and_discounts');
+// Register activation module hook
+register_activation_hook('custom_pricing', 'custom_pricing_module_activation_hook');
 
-hooks()->add_action('admin_init', 'custom_pricing_init_menu_items');
-
-function custom_pricing_install() {
-    include_once(__DIR__ . '/install.php');
+function custom_pricing_module_activation_hook()
+{
+    $CI = &get_instance();
+    require_once(__DIR__ . '/helpers/custom_pricing_helper.php');
+    require_once(__DIR__ . '/migrations/100_version_100.php');
+    
+    $migration = new Migration_Version_100();
+    $migration->up();
 }
 
-function custom_pricing_uninstall() {
-    include_once(__DIR__ . '/uninstall.php');
+function custom_pricing_module_init_menu_items()
+{
+    $CI = &get_instance();
+    
+    if (has_permission('custom_pricing', '', 'view')) {
+        $CI->app_menu->add_sidebar_menu_item('custom-pricing', [
+            'name'     => _l('custom_pricing'),
+            'icon'     => 'fa fa-tags',
+            'position' => 30,
+        ]);
+
+        $CI->app_menu->add_sidebar_children_item('custom-pricing', [
+            'slug'     => 'customer-pricing',
+            'name'     => _l('customer_pricing'),
+            'href'     => admin_url('custom_pricing/customer_pricing'),
+            'position' => 5,
+        ]);
+
+        $CI->app_menu->add_sidebar_children_item('custom-pricing', [
+            'slug'     => 'customer-group-pricing',
+            'name'     => _l('customer_group_pricing'),
+            'href'     => admin_url('custom_pricing/group_pricing'),
+            'position' => 10,
+        ]);
+
+        $CI->app_menu->add_sidebar_children_item('custom-pricing', [
+            'slug'     => 'item-groups',
+            'name'     => _l('item_groups'),
+            'href'     => admin_url('custom_pricing/item_groups'),
+            'position' => 15,
+        ]);
+
+        $CI->app_menu->add_sidebar_children_item('custom-pricing', [
+            'slug'     => 'item-group-pricing',
+            'name'     => _l('item_group_pricing'),
+            'href'     => admin_url('custom_pricing/item_groups/pricing'),
+            'position' => 20,
+        ]);
+    }
 }
 
-function custom_pricing_permissions() {
-    $capabilities = [
-        'view'   => _l('permission_view'),
+function custom_pricing_module_add_head_components()
+{
+    $CI = &get_instance();
+    $viewuri = $_SERVER['REQUEST_URI'];
+    
+    if (strpos($viewuri, '/custom_pricing/') !== false) {
+        echo '<link href="' . base_url('modules/custom_pricing/assets/css/custom_pricing.css') . '" rel="stylesheet" type="text/css" />';
+    }
+}
+
+function custom_pricing_module_add_footer_components()
+{
+    $CI = &get_instance();
+    $viewuri = $_SERVER['REQUEST_URI'];
+    
+    if (strpos($viewuri, '/custom_pricing/') !== false) {
+        echo '<script src="' . base_url('modules/custom_pricing/assets/js/custom_pricing.js') . '"></script>';
+    }
+
+    // For invoices, estimates, proposals
+    if ($CI->uri->segment(1) == 'invoices' || $CI->uri->segment(1) == 'estimates' || $CI->uri->segment(1) == 'proposals') {
+        echo '<script>
+        $(function(){
+            $(document).on("change", "select.selectpicker[name*=\'itemid\']", function(){
+                var itemid = $(this).val();
+                var rel_id = $("input[name=\'rel_id\']").val();
+                var rel_type = $("input[name=\'rel_type\']").val();
+                
+                if (itemid && rel_id && rel_type == "customer") {
+                    $.get(admin_url + "custom_pricing/get_price/" + rel_id + "/" + itemid, function(price){
+                        // Update the price field
+                        var row = $("select.selectpicker[name*=\'itemid\'][value=\'" + itemid + "\']").parents("tr");
+                        row.find("input[name*=\'rate\']").val(price);
+                    });
+                }
+            });
+        });
+        </script>';
+    }
+}
+
+function custom_pricing_module_permissions()
+{
+    $capabilities = [];
+
+    $capabilities['capabilities'] = [
+        'view'   => _l('permission_view') . '(' . _l('permission_global') . ')',
         'create' => _l('permission_create'),
         'edit'   => _l('permission_edit'),
         'delete' => _l('permission_delete'),
@@ -42,46 +131,20 @@ function custom_pricing_permissions() {
     register_staff_capabilities('custom_pricing', $capabilities, _l('custom_pricing'));
 }
 
-function custom_pricing_add_head_components() {
-    echo '<link href="' . module_dir_url(CUSTOM_PRICING_MODULE_NAME, 'assets/css/custom_pricing.css') . '" rel="stylesheet" type="text/css" />';
-}
-
-function custom_pricing_load_js() {
-    echo '<script src="' . module_dir_url(CUSTOM_PRICING_MODULE_NAME, 'assets/js/custom_pricing.js') . '"></script>';
-}
-
-function custom_pricing_apply_pricing_and_discounts($invoice_id) {
+/**
+ * Modify item price based on customer pricing rules
+ */
+function custom_pricing_modify_item_price($item)
+{
     $CI = &get_instance();
-    $CI->load->library(CUSTOM_PRICING_MODULE_NAME . '/Custom_pricing_lib');
-    $CI->custom_pricing_lib->apply_custom_pricing_to_invoice($invoice_id);
-}
+    $CI->load->helper('custom_pricing_helper');
 
-function custom_pricing_calculate_discount($price, $discount_percentage) {
-    return $price - ($price * ($discount_percentage / 100));
-}
-
-function custom_pricing_init_menu_items() {
-    if (staff_can('view', 'custom_pricing')) {
-        $CI = &get_instance();
-        $CI->app_menu->add_sidebar_menu_item('custom_pricing', [
-            'name'     => _l('custom_pricing'),
-            'icon'     => 'fa fa-percent',
-            'position' => 25,
-        ]);
-
-        $CI->app_menu->add_sidebar_children_item('custom_pricing', [
-            'slug'     => 'custom_pricing_overview',
-            'name'     => _l('custom_pricing_overview'),
-            'href'     => admin_url('custom_pricing'),
-            'position' => 5,
-        ]);
-
-        $CI->app_menu->add_sidebar_children_item('custom_pricing', [
-            'slug'     => 'custom_pricing_settings',
-            'name'     => _l('custom_pricing_settings'),
-            'href'     => admin_url('custom_pricing/settings'),
-            'position' => 10,
-        ]);
+    if (isset($item['rel_type']) && $item['rel_type'] == 'customer' && isset($item['rel_id']) && isset($item['itemid'])) {
+        $customer_id = $item['rel_id'];
+        $item_id = $item['itemid'];
+        
+        $item['rate'] = get_customer_item_price($customer_id, $item_id);
     }
-
+    
+    return $item;
 }
